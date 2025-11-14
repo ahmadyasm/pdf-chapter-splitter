@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Chapter Splitter</title>
+    <!-- 1. Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 2. Load the pdf-lib library -->
+    <script src="https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js"></script>
+    <!-- 3. Load pdf.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <!-- 4. Load JSZip -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script>
+        // Set worker source for pdf.js
+        if (window.pdfjsLib) {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+        }
+    </script>
+    <style>
+        /* Simple spinner animation */
+        .spinner {
+            border-top-color: #3498db;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        /* Style for the modal */
+        .modal {
+            transition: opacity 0.25s ease;
+        }
+        .modal-content {
+            transition: all 0.25s ease;
+        }
+    </style>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+          }
+        }
+      }
+    </script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4 font-sans">
+
+    <div class="bg-white p-8 rounded-xl shadow-xl w-full max-w-3xl space-y-8">
+        <!-- Header -->
+        <div>
+            <h1 class="text-3xl font-bold text-center text-gray-800">PDF Chapter Splitter</h1>
+            <p class="text-center text-gray-500 mt-2">Upload a PDF and define page ranges to extract.</p>
+        </div>
+
+        <!-- Error Message Area -->
+        <div id="error-message" class="hidden p-4 bg-red-100 text-red-700 rounded-lg"></div>
+
+        <!-- Step 1: Upload PDF -->
+        <div class="space-y-2">
+            <label for="pdfInput" class="text-lg font-semibold text-gray-700">Step 1: Upload your PDF</label>
+            <input type="file" id="pdfInput" accept="application/pdf" class="w-full text-sm text-gray-500
+                file:mr-4 file:py-2 file:px-4
+                file:rounded-lg file:border-0
+                file:text-sm file:font-semibold
+                file:bg-blue-50 file:text-blue-700
+                hover:file:bg-blue-100 transition-all cursor-pointer
+            ">
+            <p id="pdf-info" class="text-sm text-gray-500"></p>
+            <!-- New Button for Bookmarks -->
+            <button id="get-bookmarks-btn" class="w-full mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-all hidden">
+                <span id="bookmarks-btn-text">Get Chapters from Bookmarks (Recommended)</span>
+                <div id="bookmarks-loader" class="hidden spinner w-4 h-4 border-2 border-t-2 border-gray-200 rounded-full inline-block ml-2"></div>
+            </button>
+            <!-- Renamed Button for ToC Scan -->
+            <button id="scan-text-btn" class="w-full mt-2 px-4 py-2 bg-gray-500 text-white rounded-lg text-sm font-medium hover:bg-gray-600 transition-all hidden">
+                Scan ToC from Text (Fallback)
+            </button>
+        </div>
+
+        <!-- Step 2: Define Chapters -->
+        <div class="space-y-4">
+            <div class="flex justify-between items-center">
+                <label class="text-lg font-semibold text-gray-700">Step 2: Define Chapters</label>
+                <!-- Modified: Button Group -->
+                <div class="flex items-center gap-2">
+                    <button id="bulk-add-btn" class="px-4 py-2 bg-yellow-500 text-white rounded-lg text-sm font-medium hover:bg-yellow-600 transition-all">
+                        Bulk Add
+                    </button>
+                    <button id="add-chapter-btn" class="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-medium hover:bg-green-600 transition-all">
+                        + Add Chapter
+                    </button>
+                </div>
+                <!-- End Modified Button Group -->
+            </div>
+            <!-- Container for dynamic chapter entries -->
+            <div id="chapters-list" class="space-y-4 max-h-60 overflow-y-auto pr-2">
+                <!-- A template entry (will be created by JS) -->
+                <!-- <div class="chapter-entry grid grid-cols-1 md:grid-cols-[1fr,100px,100px,auto] gap-3 items-center p-3 bg-gray-50 rounded-lg">
+                    <input type="text" placeholder="Chapter Name (e.g., Intro)" class="chapter-name w-full p-2 border rounded-md">
+                    <input type="number" placeholder="Start Page" class="start-page w-full p-2 border rounded-md">
+                    <input type="number" placeholder="End Page" class="end-page w-full p-2 border rounded-md">
+                    <button class="remove-btn bg-red-100 text-red-600 px-3 py-2 rounded-lg hover:bg-red-200">Remove</button>
+                </div> -->
+            </div>
+        </div>
+
+        <!-- Step 3: Split & Download -->
+        <div class="space-y-4">
+            <h2 class="text-lg font-semibold text-gray-700">Step 3: Generate Files</h2>
+            <button id="split-btn" class="w-full py-3 px-6 bg-blue-600 text-white text-lg font-semibold rounded-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-3">
+                <span id="split-btn-text">Split PDF</span>
+                <div id="loader" class="hidden spinner w-5 h-5 border-4 border-t-4 border-gray-200 rounded-full"></div>
+            </button>
+        </div>
+
+        <!-- Step 4: Output Links -->
+        <div class="space-y-2">
+             <h2 class="text-lg font-semibold text-gray-700">Step 4: Download Your Files</h2>
+            <!-- New Download All Button -->
+            <button id="download-all-btn" class="w-full py-3 px-6 bg-green-600 text-white text-lg font-semibold rounded-lg hover:bg-green-700 transition-all flex items-center justify-center gap-3 hidden">
+                <span id="download-all-btn-text">Download All as ZIP</span>
+                <div id="zip-loader" class="hidden spinner w-5 h-5 border-4 border-t-4 border-gray-200 rounded-full"></div>
+            </button>
+            <!-- End New Download All Button -->
+            <div id="output-links" class="space-y-2 mt-4">
+                <!-- Download links will appear here -->
+                <p class="text-gray-400">Your generated PDF files will appear here...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Modal for ToC -->
+    <div id="toc-modal" class="modal fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 hidden z-50 opacity-0">
+        <div class="modal-content bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl transform scale-95 opacity-0">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold text-gray-800">Scanned Table of Contents</h2>
+                <button id="close-modal-btn" class="text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
+            </div>
+            <p class="text-sm text-gray-600 mb-4">This is the raw text from the first 15 pages. Use this to find your chapter names and page numbers. Note: Page numbers listed here might not match the PDF's total page count (e.g., "Page 1" might be the 10th page of the file).</p>
+            <textarea id="toc-output" readonly class="w-full h-96 p-3 border rounded-md bg-gray-50 font-mono text-sm"></textarea>
+            <!-- New Auto-fill Button -->
+            <button id="autofill-btn" class="mt-4 w-full py-2 px-4 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-all">
+                Try to Find Chapters (Experimental)
+            </button>
+            <p class="text-xs text-center text-gray-500 mt-2">This will try to find lines ending in a page number and add them to the main list. It is not 100% accurate.</p>
+            <!-- End New Button -->
+            <button id="close-modal-btn-2" class="mt-4 w-full py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <!-- New Modal for Bulk Add -->
+    <div id="bulk-add-modal" class="modal fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 hidden z-50 opacity-0">
+        <div class="modal-content bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl transform scale-95 opacity-0">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold text-gray-800">Bulk Add Chapters</h2>
+                <button id="close-bulk-modal-btn" class="text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
+            </div>
+            <p class="text-sm text-gray-600 mb-2">Enter chapters in the format: <code class="bg-gray-200 p-1 rounded">Name, Start Page, End Page</code></p>
+            <p class="text-sm text-gray-600 mb-4">Each chapter must be on a new line. This will <strong class="text-red-600">replace</strong> your current chapter list.</p>
+            
+            <!-- Bulk Add Error Message Area -->
+            <div id="bulk-error-message" class="hidden p-3 mb-4 bg-red-100 text-red-700 rounded-lg text-sm"></div>
+
+            <textarea id="bulk-add-input" class="w-full h-80 p-3 border rounded-md bg-gray-50 font-mono text-sm" placeholder="Introduction, 1, 5&#10;Chapter 1, 6, 20&#10;Chapter 2, 21, 45"></textarea>
+            
+            <button id="process-bulk-btn" class="mt-4 w-full py-2 px-4 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-all">
+                Add Chapters and Close
+            </button>
+            <button id="close-bulk-modal-btn-2" class="mt-4 w-full py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                Cancel
+            </button>
+        </div>
+    </div>
+    <!-- End New Modal -->
+
+
+    <script>
+        // Set worker source for pdf.js right after script load
+        if (window.pdfjsLib) {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+        } else {
+            console.warn("pdf.js library not loaded.");
+        }
+
+        // Get all necessary elements from the DOM
+        const pdfInput = document.getElementById('pdfInput');
+        const pdfInfo = document.getElementById('pdf-info');
+        const addChapterBtn = document.getElementById('add-chapter-btn');
+        const chaptersList = document.getElementById('chapters-list');
+        const splitBtn = document.getElementById('split-btn');
+        const splitBtnText = document.getElementById('split-btn-text');
+        const loader = document.getElementById('loader');
+        const outputLinks = document.getElementById('output-links');
+        const errorMessage = document.getElementById('error-message');
+        // New/Renamed elements
+        const getBookmarksBtn = document.getElementById('get-bookmarks-btn');
+        const bookmarksBtnText = document.getElementById('bookmarks-btn-text');
+        const bookmarksLoader = document.getElementById('bookmarks-loader');
+        const scanTextBtn = document.getElementById('scan-text-btn'); // Renamed from scanTocBtn
+        const tocModal = document.getElementById('toc-modal');
+        const tocOutput = document.getElementById('toc-output');
+        const closeModalBtn = document.getElementById('close-modal-btn');
+        const closeModalBtn2 = document.getElementById('close-modal-btn-2');
+        const autofillBtn = document.getElementById('autofill-btn');
+        // New Bulk Add elements
+        const bulkAddBtn = document.getElementById('bulk-add-btn');
+        const bulkAddModal = document.getElementById('bulk-add-modal');
+        const bulkAddInput = document.getElementById('bulk-add-input');
+        const processBulkBtn = document.getElementById('process-bulk-btn');
+        const closeBulkModalBtn = document.getElementById('close-bulk-modal-btn');
+        const closeBulkModalBtn2 = document.getElementById('close-bulk-modal-btn-2');
+        const bulkErrorMessage = document.getElementById('bulk-error-message');
+        // New Download All elements
+        const downloadAllBtn = document.getElementById('download-all-btn');
+        const downloadAllBtnText = document.getElementById('download-all-btn-text');
+        const zipLoader = document.getElementById('zip-loader');
+
+
+        // Store the loaded PDF file bytes
+        let originalPdfBytes = null;
+        let totalPageCount = 0;
+        let generatedFiles = []; // Store generated files for zipping
+
+        // When a user selects a file
+        pdfInput.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file || file.type !== 'application/pdf') {
+                showError('Please select a valid PDF file.');
+                pdfInfo.textContent = '';
+                originalPdfBytes = null;
+                getBookmarksBtn.classList.add('hidden'); // Hide scan button
+                scanTextBtn.classList.add('hidden'); // Hide scan button
+                return;
+            }
+
+            clearError();
+            
+            try {
+                // Read the file as an ArrayBuffer
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    originalPdfBytes = e.target.result;
+                    
+                    // Pre-load the PDF to get page count
+                    try {
+                        const { PDFDocument } = window.PDFLib;
+                        const pdfDoc = await PDFDocument.load(originalPdfBytes);
+                        totalPageCount = pdfDoc.getPageCount();
+                        pdfInfo.textContent = `File loaded: ${file.name} (${totalPageCount} pages total)`;
+                        getBookmarksBtn.classList.remove('hidden'); // Show bookmarks button
+                        scanTextBtn.classList.remove('hidden'); // Show text scan button
+                    } catch (err) {
+                        showError('Could not read the PDF file. It might be corrupted or protected.');
+                        originalPdfBytes = null;
+                        pdfInfo.textContent = '';
+                        getBookmarksBtn.classList.add('hidden'); // Hide buttons
+                        scanTextBtn.classList.add('hidden'); // Hide buttons
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            } catch (err) {
+                 showError('Error reading file.');
+                 originalPdfBytes = null;
+                 pdfInfo.textContent = '';
+                 getBookmarksBtn.classList.add('hidden'); // Hide buttons
+                 scanTextBtn.classList.add('hidden'); // Hide buttons
+            }
+        });
+
+        // Function to show an error message
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.remove('hidden');
+        }
+
+        // Function to clear the error message
+        function clearError() {
+            errorMessage.textContent = '';
+            errorMessage.classList.add('hidden');
+        }
+
+        // --- New Modal Logic ---
+        function showModal() {
+            tocModal.classList.remove('hidden');
+            setTimeout(() => {
+                tocModal.classList.remove('opacity-0');
+                tocModal.querySelector('.modal-content').classList.remove('scale-95', 'opacity-0');
+                tocModal.querySelector('.modal-content').classList.add('scale-100', 'opacity-100');
+            }, 10); // small delay to allow transition
+        }
+
+        function hideModal() {
+            tocModal.querySelector('.modal-content').classList.add('scale-95', 'opacity-0');
+            tocModal.querySelector('.modal-content').classList.remove('scale-100', 'opacity-100');
+            tocModal.classList.add('opacity-0');
+            setTimeout(() => {
+                tocModal.classList.add('hidden');
+            }, 250); // wait for animation
+        }
+
+        closeModalBtn.addEventListener('click', hideModal);
+        closeModalBtn2.addEventListener('click', hideModal);
+        tocModal.addEventListener('click', (e) => {
+            // Close if clicked on the background
+            if (e.target === tocModal) {
+                hideModal();
+            }
+        });
+
+        // --- New Get Bookmarks Logic ---
+        getBookmarksBtn.addEventListener('click', async () => {
+            if (!originalPdfBytes) {
+                showError('Please upload a PDF first.');
+                return;
+            }
+            if (!window.pdfjsLib) {
+                 showError('PDF library (pdf.js) is not loaded.');
+                 return;
+            }
+
+            clearError();
+            bookmarksBtnText.textContent = 'Reading Bookmarks...';
+            bookmarksLoader.classList.remove('hidden');
+            getBookmarksBtn.disabled = true;
+
+            try {
+                const { pdfjsLib } = window;
+                const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(originalPdfBytes) }).promise;
+                
+                const outline = await pdfDoc.getOutline();
+
+                if (!outline || outline.length === 0) {
+                    showError('This PDF does not contain any bookmarks. Please use the "Scan ToC from Text" fallback.');
+                    return;
+                }
+
+                let matches = [];
+                // We will parse only the top-level bookmarks, which usually correspond to chapters.
+                for (const item of outline) {
+                    try {
+                        const title = item.title;
+                        // getDestination returns a promise
+                        const dest = await pdfDoc.getDestination(item.dest);
+                        // getPageIndex needs the *reference* which is the first item in the dest array
+                        const pageIndex = await pdfDoc.getPageIndex(dest[0]);
+                        // Add 1 to convert from 0-indexed to 1-indexed
+                        const pageNum = pageIndex + 1; 
+                        
+                        matches.push({ title: title, startPage: pageNum });
+                    } catch (destErr) {
+                        console.warn("Could not process bookmark destination: ", destErr);
+                    }
+                }
+                
+                if (matches.length === 0) {
+                    showError('Could not find any valid chapter bookmarks.');
+                    return;
+                }
+
+                // Clear the existing list
+                chaptersList.innerHTML = ''; 
+
+                // Create new entries based on matches
+                for (let i = 0; i < matches.length; i++) {
+                    const current = matches[i];
+                    let endPage;
+                    
+                    if (i === matches.length - 1) {
+                        // This is the last chapter. Set end page to total pages.
+                        endPage = totalPageCount; 
+                    } else {
+                        // End page is one less than the *next* chapter's start page.
+                        endPage = matches[i+1].startPage - 1;
+                    }
+
+                    // Sanity check: if end page is less than start page, make it a single page
+                    if (endPage < current.startPage) {
+                        endPage = current.startPage;
+                    }
+                    
+                    addChapterRow(current.title, current.startPage, endPage);
+                }
+
+                clearError(); // Clear any previous errors
+
+            } catch (err) {
+                showError('Error reading bookmarks: ' + err.message);
+            } finally {
+                bookmarksBtnText.textContent = 'Get Chapters from Bookmarks (Recommended)';
+                bookmarksLoader.classList.add('hidden');
+                getBookmarksBtn.disabled = false;
+            }
+        });
+
+        // --- Renamed from scanTocBtn ---
+        scanTextBtn.addEventListener('click', async () => {
+            if (!originalPdfBytes) {
+                showError('Please upload a PDF first.');
+                return;
+            }
+            if (!window.pdfjsLib) {
+                 showError('Text scanning library (pdf.js) is not loaded.');
+                 return;
+            }
+
+            clearError();
+            scanTextBtn.textContent = 'Scanning...';
+            scanTextBtn.disabled = true;
+            tocOutput.value = 'Loading PDF and extracting text...';
+            showModal();
+
+            try {
+                const { pdfjsLib } = window;
+                const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(originalPdfBytes) }).promise;
+                
+                const numPagesToScan = Math.min(pdfDoc.numPages, 15);
+                let fullText = `Scanning first ${numPagesToScan} pages...\n\n`;
+                tocOutput.value = fullText;
+
+                for (let i = 1; i <= numPagesToScan; i++) {
+                    fullText += `--- Page ${i} ---\n`;
+                    tocOutput.value = fullText + "\nScanning this page..."; // Update live
+                    const page = await pdfDoc.getPage(i);
+                    const textContent = await page.getTextContent();
+                    
+                    const textItems = textContent.items.map(item => item.str);
+                    fullText += textItems.join(' ') + '\n\n';
+                    
+                    tocOutput.value = fullText; // Update live
+                }
+
+                tocOutput.value = fullText;
+                
+            } catch (err) {
+                showError('Error scanning PDF with pdf.js: ' + err.message);
+                tocOutput.value = 'Failed to scan PDF. ' + err.message;
+            } finally {
+                scanTextBtn.textContent = 'Scan ToC from Text (Fallback)';
+                scanTextBtn.disabled = false;
+            }
+        });
+
+        // --- New Auto-fill Logic ---
+        autofillBtn.addEventListener('click', () => {
+            const text = tocOutput.value;
+            
+            // Regex explained:
+            // ^        - Start of a line (due to 'm' flag)
+            // (.+?)    - Capture group 1: The chapter title (non-greedy, at least one char)
+            // [\s\.]+ - Match one or more spaces or dots (the ... part)
+            // (\d+)    - Capture group 2: The page number (one or more digits)
+            // $        - End of a line (due to 'm' flag)
+            const regex = /^(.+?)[\s\.]+(\d+)$/gm;
+            
+            let matches = [];
+            let match;
+
+            while ((match = regex.exec(text)) !== null) {
+                const title = match[1].trim();
+                // Filter out common ToC junk
+                if (title.toLowerCase().startsWith('page') || 
+                    title.toLowerCase().startsWith('content') ||
+                    title.length < 3) { // Filter short/junk lines
+                    continue;
+                }
+                matches.push({ title: title, startPage: parseInt(match[2]) });
+            }
+
+            if (matches.length === 0) {
+                // Use a simple modal instead of alert
+                showError("Could not find any chapters. This feature works best on ToCs formatted like 'Chapter Title ....... 10'. Please fill them in manually.");
+                hideModal(); // Hide the ToC modal
+                return;
+            }
+
+            // Clear the existing list
+            chaptersList.innerHTML = ''; 
+
+            // Create new entries based on matches
+            for (let i = 0; i < matches.length; i++) {
+                const current = matches[i];
+                let endPage;
+                
+                if (i === matches.length - 1) {
+                    // This is the last chapter. Set end page to total pages.
+                    endPage = totalPageCount; 
+                } else {
+                    // End page is one less than the *next* chapter's start page.
+                    endPage = matches[i+1].startPage - 1;
+                }
+
+                // Sanity check: if end page is less than start page, make it a single page
+                if (endPage < current.startPage) {
+                    endPage = current.startPage;
+                }
+                
+                addChapterRow(current.title, current.startPage, endPage);
+            }
+            
+            // Close the modal and clear the error
+            hideModal();
+            clearError();
+        });
+
+
+        // Refactored function to add a chapter row
+        function addChapterRow(name = '', start = '', end = '') {
+            const entry = document.createElement('div');
+            entry.className = 'chapter-entry grid grid-cols-1 md:grid-cols-[1fr,100px,100px,auto] gap-3 items-center p-3 bg-gray-50 rounded-lg animate-fade-in';
+            
+            // Sanitize values before inserting
+            const safeName = name.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            const safeStart = start.toString().replace(/"/g, '&quot;');
+            const safeEnd = end.toString().replace(/"/g, '&quot;');
+
+            entry.innerHTML = `
+                <input type="text" placeholder="Chapter Name (e.g., Intro)" class="chapter-name w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none" value="${safeName}">
+                <input type="number" placeholder="Start" class="start-page w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none" min="1" value="${safeStart}">
+                <input type="number" placeholder="End" class="end-page w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none" min="1" value="${safeEnd}">
+                <button class="remove-btn bg-red-100 text-red-600 px-3 py-2 rounded-lg hover:bg-red-200 transition-all font-medium">Remove</button>
+            `;
+            
+            // Add event listener for the new remove button
+            entry.querySelector('.remove-btn').addEventListener('click', () => {
+                entry.remove();
+            });
+            
+            chaptersList.appendChild(entry);
+        }
+
+        // Function to create a new chapter definition row
+        function createChapterEntry() {
+            addChapterRow(); // Use the new helper
+        }
+
+        // Add a new chapter entry when the button is clicked
+        addChapterBtn.addEventListener('click', createChapterEntry);
+        
+        // Create one entry by default for the user
+        addChapterRow(); // Use the new helper
+        
+        // Main function to split the PDF
+        splitBtn.addEventListener('click', async () => {
+            clearError();
+            generatedFiles = []; // Reset the files array
+            downloadAllBtn.classList.add('hidden'); // Hide zip button
+            
+            // 1. Validation
+            if (!originalPdfBytes) {
+                showError('Please upload a PDF file first.');
+                return;
+            }
+            
+            const chapterEntries = document.querySelectorAll('.chapter-entry');
+            if (chapterEntries.length === 0) {
+                showError('Please add at least one chapter definition.');
+                return;
+            }
+            
+            const definitions = [];
+            let hasError = false;
+            
+            chapterEntries.forEach((entry, index) => {
+                const nameInput = entry.querySelector('.chapter-name');
+                const startInput = entry.querySelector('.start-page');
+                const endInput = entry.querySelector('.end-page');
+
+                const name = nameInput.value.trim();
+                const start = parseInt(startInput.value);
+                const end = parseInt(endInput.value);
+
+                // Reset error styles
+                [nameInput, startInput, endInput].forEach(el => el.classList.remove('border-red-500', 'ring-red-500'));
+
+                if (!name) {
+                    showError(`Chapter ${index + 1} needs a name.`);
+                    nameInput.classList.add('border-red-500', 'ring-red-500');
+                    hasError = true;
+                }
+                if (isNaN(start) || start < 1) {
+                    showError(`Chapter ${index + 1} has an invalid start page. Must be 1 or greater.`);
+                    startInput.classList.add('border-red-500', 'ring-red-500');
+                    hasError = true;
+                }
+                if (isNaN(end) || end < start) {
+                    showError(`Chapter ${index + 1} has an invalid end page. Must be equal to or greater than the start page.`);
+                    endInput.classList.add('border-red-500', 'ring-red-500');
+                    hasError = true;
+                }
+                 if (end > totalPageCount) {
+                    showError(`Chapter ${index + 1} end page (${end}) is greater than the total page count (${totalPageCount}).`);
+                    endInput.classList.add('border-red-500', 'ring-red-500');
+                    hasError = true;
+                }
+
+                if (!hasError) {
+                    // Convert to 0-based index for pdf-lib
+                    definitions.push({ name, start: start - 1, end: end - 1 });
+                }
+            });
+            
+            if (hasError) {
+                return; // Stop if there are validation errors
+            }
+
+            // 2. Start Processing
+            loader.classList.remove('hidden');
+            splitBtnText.textContent = 'Processing...';
+            splitBtn.disabled = true;
+            outputLinks.innerHTML = '<p class="text-gray-400">Generating files...</p>';
+            
+            try {
+                const { PDFDocument } = window.PDFLib;
+                // Load the original PDF
+                const pdfDoc = await PDFDocument.load(originalPdfBytes);
+                
+                // Clear the output area
+                outputLinks.innerHTML = '';
+                
+                // Process each chapter definition
+                for (const def of definitions) {
+                    // Create a new, blank PDF document
+                    const newPdf = await PDFDocument.create();
+                    
+                    // Get the page indices to copy
+                    const indices = [];
+                    for (let i = def.start; i <= def.end; i++) {
+                        indices.push(i);
+                    }
+                    
+                    // Copy the pages from the original document
+                    const copiedPages = await newPdf.copyPages(pdfDoc, indices);
+                    
+                    // Add the copied pages to the new document
+                    for (const page of copiedPages) {
+                        newPdf.addPage(page);
+                    }
+                    
+                    // Save the new PDF as bytes
+                    const newPdfBytes = await newPdf.save();
+                    
+                    // Create a blob and a download link
+                    const blob = new Blob([newPdfBytes], { type: 'application/pdf' });
+                    const url = URL.createObjectURL(blob);
+                    
+                    const a = document.createElement('a');
+                    a.href = url;
+                    // Sanitize filename
+                    const safeName = def.name.replace(/[^a-z0-9\s-]/gi, '_') || 'chapter';
+                    const fileName = `${safeName}.pdf`;
+                    a.download = fileName;
+                    a.textContent = `Download ${def.name}.pdf`;
+                    a.className = 'block w-full text-center p-3 bg-blue-100 text-blue-700 font-medium rounded-lg hover:bg-blue-200 transition-all';
+                    
+                    outputLinks.appendChild(a);
+
+                    // Add file to array for zipping
+                    generatedFiles.push({ name: fileName, blob: blob });
+                }
+
+                // Show the Download All button if files were generated
+                if (generatedFiles.length > 0) {
+                    downloadAllBtn.classList.remove('hidden');
+                }
+                
+            } catch (err) {
+                showError('An unexpected error occurred during PDF splitting. ' + err.message);
+                outputLinks.innerHTML = '<p class="text-gray-400">Failed to generate files.</p>';
+            } finally {
+                // 3. Reset UI
+                loader.classList.add('hidden');
+                splitBtnText.textContent = 'Split PDF';
+                splitBtn.disabled = false;
+            }
+        });
+
+        // --- New Download All (ZIP) Logic ---
+        downloadAllBtn.addEventListener('click', async () => {
+            if (generatedFiles.length === 0) {
+                showError('No files to zip. Please split the PDF first.');
+                return;
+            }
+            if (!window.JSZip) {
+                showError('Zipping library (JSZip) not loaded.');
+                return;
+            }
+
+            // Show loading state
+            downloadAllBtn.disabled = true;
+            downloadAllBtnText.textContent = 'Zipping...';
+            zipLoader.classList.remove('hidden');
+
+            try {
+                const zip = new window.JSZip();
+
+                // Add each file to the zip
+                for (const file of generatedFiles) {
+                    zip.file(file.name, file.blob);
+                }
+
+                // Generate the zip file
+                const zipBlob = await zip.generateAsync({
+                    type: "blob",
+                    compression: "DEFLATE",
+                    compressionOptions: {
+                        level: 9
+                    }
+                });
+
+                // Create a download link for the zip
+                const url = URL.createObjectURL(zipBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'chapters.zip';
+                document.body.appendChild(a); // Append to body to make it clickable
+                a.click();
+                document.body.removeChild(a); // Clean up
+                URL.revokeObjectURL(url); // Clean up blob URL
+
+            } catch (err) {
+                showError('Error creating zip file: ' + err.message);
+            } finally {
+                // Reset button state
+                downloadAllBtn.disabled = false;
+                downloadAllBtnText.textContent = 'Download All as ZIP';
+                zipLoader.classList.add('hidden');
+            }
+        });
+
+    </script>
+</body>
+</html>
